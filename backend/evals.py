@@ -79,8 +79,11 @@ async def run_evals() -> dict[str, Any]:
             for k in total_usage:
                 total_usage[k] += r["usage"].get(k) or 0
         if case["answerable"]:
-            passed, reason = _judge_answerable_case(case, r)
-            metric_applicable = True
+            if case.get("requires_computation") and detected_mode == "offline_retrieval":
+                passed, reason, metric_applicable = True, "纯检索模式不具备计算能力(无LLM/工具调用),该指标不适用", False
+            else:
+                passed, reason = _judge_answerable_case(case, r)
+                metric_applicable = True
         else:
             passed, reason, metric_applicable = _judge_unanswerable_case(case, r, detected_mode)
         results.append({

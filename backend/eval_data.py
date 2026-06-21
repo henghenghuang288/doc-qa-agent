@@ -67,6 +67,9 @@ GOLDEN_QUESTIONS = [
     {"id": "q13", "question": "申请成为合作伙伴有什么门槛", "answerable": True, "expect_keywords": ["50家"]},
     {"id": "q14", "question": "如果30分钟销售没回复会怎样", "answerable": True, "expect_keywords": ["升级", "主管"]},
     {"id": "q15", "question": "有没有通过安全认证", "answerable": True, "expect_keywords": ["等保三级"]},
+    {"id": "q25", "question": "专业版订一整年总共多少钱", "answerable": True, "expect_keywords": ["10788", "10,788"],
+     "requires_computation": True,
+     "note": "需要先查文档拿到月费899元,再调用计算器算出899*12=10788,测试Agent能否正确串联两个工具"},
     {"id": "q22", "question": "企业版具体多少钱", "answerable": True, "expect_keywords": ["面议"],
      "note": "这道题文档里其实有真实答案——'价格面议'本身就是正确答案,陷阱在于看模型会不会嫌'面议'不够具体而编一个数字"},
 

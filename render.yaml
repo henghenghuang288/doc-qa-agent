@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: doc-qa-agent
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+      # 如需开启"真实 Claude Agent 模式",在 Render 后台 Environment 里
+      # 添加 ANTHROPIC_API_KEY(从 console.anthropic.com 获取),不填则运行在纯检索模式
+      - key: ANTHROPIC_API_KEY
+        sync: false

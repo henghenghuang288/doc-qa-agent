@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>企业文档问答 Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#15141a; --panel:#1c1a22; --panel-raised:#242028; --border:#322f3b;
+    --text:#f0ece4; --muted:#8d8896; --accent:#ff9d3d; --accent-soft:rgba(255,157,61,0.14);
+    --ok:#6ee7b7; --warn:#ff6b6b; --radius:10px;
+    --display:'Space Grotesk',sans-serif; --mono:'JetBrains Mono',monospace; --body:'Inter',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);min-height:100vh;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:1px solid var(--border);}
+  .mark{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:700;font-size:18px;}
+  .tally{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+  .mode-pill{font-family:var(--mono);font-size:12px;color:var(--muted);border:1px solid var(--border);padding:5px 10px;border-radius:999px;}
+  .mode-pill.live{color:var(--ok);border-color:rgba(110,231,183,0.3);}
+
+  .layout{display:grid;grid-template-columns:340px 1fr;min-height:calc(100vh - 61px);}
+  @media (max-width:880px){.layout{grid-template-columns:1fr;}}
+
+  .doc-panel{border-right:1px solid var(--border);padding:24px;}
+  .doc-panel h1{font-family:var(--display);font-size:20px;margin:0 0 6px;}
+  .doc-panel .sub{color:var(--muted);font-size:13px;line-height:1.6;margin:0 0 20px;}
+
+  .dropzone{
+    border:1.5px dashed var(--border); border-radius:var(--radius);
+    padding:24px 16px; text-align:center; cursor:pointer; color:var(--muted);
+    font-size:13px; line-height:1.6; transition:border-color .15s,color .15s;
+  }
+  .dropzone:hover, .dropzone.drag{border-color:var(--accent);color:var(--accent);}
+  .dropzone .hint{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:6px;display:block;}
+  #fileInput{display:none;}
+
+  .filelist{margin-top:18px;display:flex;flex-direction:column;gap:8px;}
+  .file-chip{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    background:var(--panel-raised);border:1px solid var(--border);border-radius:8px;
+    padding:8px 10px;font-size:12.5px;
+  }
+  .file-chip .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .file-chip .meta{font-family:var(--mono);color:var(--muted);font-size:11px;flex-shrink:0;}
+
+  .upload-error{
+    margin-top:12px;font-family:var(--mono);font-size:12px;color:var(--warn);
+    background:rgba(255,107,107,0.08);border:1px solid rgba(255,107,107,0.25);
+    border-radius:8px;padding:10px 12px;line-height:1.6;
+  }
+
+  .formats-note{margin-top:20px;font-size:12px;color:var(--muted);line-height:1.7;}
+  .formats-note b{color:var(--text);}
+
+  .chat-panel{display:flex;flex-direction:column;padding:24px 28px;min-height:calc(100vh - 109px);}
+  .chat-empty{color:var(--muted);font-size:13.5px;line-height:1.7;max-width:48ch;margin:auto;text-align:center;}
+
+  .chat-log{flex:1;display:flex;flex-direction:column;gap:18px;margin-bottom:18px;}
+  .qa-block{display:flex;flex-direction:column;gap:10px;}
+  .q-bubble{
+    align-self:flex-end; background:var(--accent-soft); border:1px solid rgba(255,157,61,0.3);
+    color:var(--text); padding:9px 14px; border-radius:10px 10px 2px 10px; font-size:14px; max-width:70%;
+  }
+  .a-block{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden;
+  }
+  .a-text{padding:14px 16px;font-size:14px;line-height:1.7;}
+  .a-text.warn{color:var(--warn);}
+  .grounded-tag{
+    display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11px;
+    color:var(--ok);margin-bottom:8px;
+  }
+  .grounded-tag.no{color:var(--warn);}
+  .citations{border-top:1px solid var(--border);padding:12px 16px;background:var(--panel-raised);}
+  .citations .label{font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:8px;}
+  .citation{
+    font-family:var(--mono);font-size:12px;line-height:1.6;color:var(--text);
+    background:var(--bg);border:1px solid var(--border);border-radius:6px;
+    padding:10px 12px;margin-bottom:8px;white-space:pre-wrap;
+  }
+  .citation:last-child{margin-bottom:0;}
+  .citation .src{display:block;color:var(--accent);font-size:11px;margin-bottom:4px;}
+
+  .ask-row{display:flex;gap:10px;margin-top:auto;}
+  .ask-row input{
+    flex:1;background:var(--panel-raised);border:1px solid var(--border);border-radius:var(--radius);
+    color:var(--text);padding:12px 14px;font-size:14px;font-family:var(--body);
+  }
+  .ask-row input:focus, .dropzone:focus-visible, button:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  .ask-row button{
+    background:var(--accent);color:#1a1206;border:none;border-radius:var(--radius);
+    padding:0 20px;font-family:var(--display);font-weight:700;font-size:14px;cursor:pointer;
+  }
+  .ask-row button:disabled{opacity:0.5;cursor:not-allowed;}
+  .ask-row button:not(:disabled):hover{filter:brightness(1.08);}
+
+  @media (prefers-reduced-motion: reduce){*{transition:none !important;}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="mark"><span class="tally"></span> 企业文档问答 Agent</div>
+  <div class="mode-pill" id="modePill">检测模式中…</div>
+</div>
+
+<div class="layout">
+  <div class="doc-panel">
+    <h1>文档库</h1>
+    <p class="sub">上传企业文档,之后所有回答都只依据这些文档原文。</p>
+
+    <div class="dropzone" id="dropzone" tabindex="0" role="button">
+      点击或拖拽文件到这里
+      <span class="hint">支持 pdf / txt / md / docx · 单文件最大 10MB</span>
+    </div>
+    <input type="file" id="fileInput" accept=".pdf,.txt,.md,.docx" />
+
+    <div class="filelist" id="fileList"></div>
+    <div id="uploadError"></div>
+
+    <div class="formats-note">
+      <b>检索说明</b> · 基于 BM25 关键词检索(jieba中文分词),所有回答会标注引用的原文片段,可直接核对来源。
+    </div>
+  </div>
+
+  <div class="chat-panel">
+    <div class="chat-log" id="chatLog">
+      <div class="chat-empty" id="chatEmpty">左侧上传至少一份文档后,在下方输入问题——回答会附带引用的原文片段,方便你核对答案是否真的来自文档。</div>
+    </div>
+    <div class="ask-row">
+      <input type="text" id="questionInput" placeholder="基于已上传文档提问…" disabled />
+      <button id="askBtn" disabled>提问</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let sessionId = null;
+let hasDocuments = false;
+
+async function initSession() {
+  const r = await fetch('/api/session', { method: 'POST' });
+  const d = await r.json();
+  sessionId = d.session_id;
+}
+
+const modePill = document.getElementById('modePill');
+fetch('/api/health').then(r => r.json()).then(d => {
+  modePill.textContent = d.live_mode ? 'LIVE · Claude Agent' : 'OFFLINE 纯检索模式';
+  modePill.classList.toggle('live', d.live_mode);
+}).catch(() => { modePill.textContent = '后端未连接'; });
+
+initSession();
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const fileList = document.getElementById('fileList');
+const uploadError = document.getElementById('uploadError');
+const questionInput = document.getElementById('questionInput');
+const askBtn = document.getElementById('askBtn');
+const chatLog = document.getElementById('chatLog');
+const chatEmpty = document.getElementById('chatEmpty');
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+['dragover','dragenter'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('drag'); }));
+['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('drag'); }));
+dropzone.addEventListener('drop', e => { if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change', () => { if (fileInput.files.length) uploadFile(fileInput.files[0]); });
+
+async function uploadFile(file) {
+  uploadError.innerHTML = '';
+  if (!sessionId) await initSession();
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const r = await fetch(`/api/session/${sessionId}/upload`, { method: 'POST', body: formData });
+    const data = await r.json();
+    if (!r.ok) {
+      uploadError.innerHTML = `<div class="upload-error">⚠ ${data.detail}</div>`;
+      return;
+    }
+    const chip = document.createElement('div');
+    chip.className = 'file-chip';
+    chip.innerHTML = `<span class="name">${data.filename}</span><span class="meta">${data.chunk_count}块 / ${data.char_count}字</span>`;
+    fileList.appendChild(chip);
+
+    hasDocuments = true;
+    questionInput.disabled = false;
+    askBtn.disabled = false;
+  } catch (e) {
+    uploadError.innerHTML = `<div class="upload-error">⚠ 上传失败,请确认后端服务已启动</div>`;
+  }
+  fileInput.value = '';
+}
+
+async function askQuestion() {
+  const q = questionInput.value.trim();
+  if (!q || !sessionId) return;
+
+  if (chatEmpty) chatEmpty.remove();
+
+  const block = document.createElement('div');
+  block.className = 'qa-block';
+  block.innerHTML = `<div class="q-bubble">${escapeHtml(q)}</div><div class="a-block"><div class="a-text">检索中…</div></div>`;
+  chatLog.appendChild(block);
+  chatLog.scrollTop = chatLog.scrollHeight;
+
+  questionInput.value = '';
+  askBtn.disabled = true;
+
+  try {
+    const r = await fetch(`/api/session/${sessionId}/ask`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ question: q })
+    });
+    const data = await r.json();
+    const aBlock = block.querySelector('.a-block');
+
+    if (!r.ok) {
+      aBlock.innerHTML = `<div class="a-text warn">⚠ ${data.detail}</div>`;
+      return;
+    }
+
+    const groundedTag = data.grounded
+      ? `<span class="grounded-tag">● 基于检索到的文档片段作答</span>`
+      : `<span class="grounded-tag no">○ 未在文档中找到依据</span>`;
+
+    let citationsHtml = '';
+    if (data.citations && data.citations.length) {
+      citationsHtml = `<div class="citations"><div class="label">引用的原文片段(共${data.citations.length}处)</div>` +
+        data.citations.map(c => `<div class="citation"><span class="src">${c.source}</span>${escapeHtml(c.text)}</div>`).join('') +
+        `</div>`;
+    }
+
+    aBlock.innerHTML = `<div class="a-text">${groundedTag}<br>${escapeHtml(data.answer)}</div>${citationsHtml}`;
+  } catch (e) {
+    block.querySelector('.a-block').innerHTML = `<div class="a-text warn">⚠ 请求失败,请确认后端服务已启动</div>`;
+  } finally {
+    askBtn.disabled = false;
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+askBtn.addEventListener('click', askQuestion);
+questionInput.addEventListener('keydown', e => { if (e.key === 'Enter') askQuestion(); });
+</script>
+</body>
+</html>

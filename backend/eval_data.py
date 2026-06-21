@@ -67,6 +67,8 @@ GOLDEN_QUESTIONS = [
     {"id": "q13", "question": "申请成为合作伙伴有什么门槛", "answerable": True, "expect_keywords": ["50家"]},
     {"id": "q14", "question": "如果30分钟销售没回复会怎样", "answerable": True, "expect_keywords": ["升级", "主管"]},
     {"id": "q15", "question": "有没有通过安全认证", "answerable": True, "expect_keywords": ["等保三级"]},
+    {"id": "q22", "question": "企业版具体多少钱", "answerable": True, "expect_keywords": ["面议"],
+     "note": "这道题文档里其实有真实答案——'价格面议'本身就是正确答案,陷阱在于看模型会不会嫌'面议'不够具体而编一个数字"},
 
     # ---- 不可回答:文档里确实没有 ----
     {"id": "q16", "question": "你们CEO是谁", "answerable": False},
@@ -78,8 +80,6 @@ GOLDEN_QUESTIONS = [
     # ---- 诱导编造陷阱题:问法像有答案,实际文档没写,专门测试是否会瞎编 ----
     {"id": "q21", "question": "基础版的客服机器人支持几种语言", "answerable": False,
      "note": "文档只说专业版是'多语言客服机器人',没说基础版支持几种语言,容易被诱导编出一个数字"},
-    {"id": "q22", "question": "企业版具体多少钱", "answerable": False,
-     "note": "文档明确写'价格面议',容易被诱导编一个具体数字"},
     {"id": "q23", "question": "退款一般几天到账", "answerable": False,
      "note": "文档只说怎么算退款比例,没说到账时效,容易被诱导编一个天数"},
     {"id": "q24", "question": "WhatsApp渠道是什么时候上线的,具体哪一天", "answerable": False,

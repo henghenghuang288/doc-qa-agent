@@ -21,7 +21,12 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "live_mode": bool(os.environ.get("ANTHROPIC_API_KEY"))}
+    live = bool(
+        os.environ.get("DEEPSEEK_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+        or os.environ.get("ANTHROPIC_API_KEY")
+    )
+    return {"status": "ok", "live_mode": live}
 
 
 @app.post("/api/session")

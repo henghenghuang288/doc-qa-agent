@@ -149,7 +149,7 @@ async function initSession() {
 
 const modePill = document.getElementById('modePill');
 fetch('/api/health').then(r => r.json()).then(d => {
-  modePill.textContent = d.live_mode ? 'LIVE · Claude Agent' : 'OFFLINE 纯检索模式';
+  modePill.textContent = d.live_mode ? '智能问答模式 · 在线' : 'OFFLINE 纯检索模式';
   modePill.classList.toggle('live', d.live_mode);
 }).catch(() => { modePill.textContent = '后端未连接'; });
 

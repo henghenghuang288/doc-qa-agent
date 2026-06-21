@@ -1,0 +1,25 @@
+# 一行命令启动整套服务:docker compose up -d
+# 适合客户在自己的内网服务器上跑起来,数据全程不出公司网络。
+
+services:
+  doc-qa-agent:
+    build: .
+    container_name: doc-qa-agent
+    ports:
+      - "8000:8000"   # 宿主机 8000 端口,可按需改成别的
+    environment:
+      # 三种数据安全档位,按客户要求选其一:
+      #
+      # 档位一(最高安全,完全离线):什么都不填。
+      #   系统以纯检索模式运行,不发任何外网请求,文档只在内存里,重启即清空。
+      #
+      # 档位二(用 DeepSeek 云 API):取消下面这行注释并填入 key。
+      #   文档片段会发往 DeepSeek 服务器做总结,适合可接受云调用的客户。
+      # - DEEPSEEK_API_KEY=sk-xxxxxxxx
+      #
+      # 档位三(完全本地化,数据零外发):客户内网自建开源模型(如 vLLM 跑 Qwen),
+      #   然后把下面两行指向内网地址,智能问答全程在公司内网完成。
+      # - OPENAI_API_KEY=any-placeholder
+      # - OPENAI_BASE_URL=http://内网模型地址:8000/v1
+      PYTHONUNBUFFERED: "1"
+    restart: unless-stopped

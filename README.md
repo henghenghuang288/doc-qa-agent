@@ -13,12 +13,16 @@
 
 每个回答都会附带它引用的原文片段和来源文件名,使用者可以当场核对答案是否真的来自文档。
 
-## 两种运行模式
+## 运行模式
+
+按可用的 API Key 自动切换,无需改代码:
 
 | 模式 | 触发条件 | 行为 |
 |------|----------|------|
-| 纯检索模式 | 未配置 `ANTHROPIC_API_KEY` | 直接返回 BM25 命中的原文片段,不做 LLM 总结。本身就是一个可用的企业内部搜索工具。 |
-| Agent 模式 | 配置了 `ANTHROPIC_API_KEY` | Claude 通过 Tool Calling 自主检索,基于片段生成自然语言回答,并判断文档中是否真的存在答案。 |
+| 纯检索模式 | 未配置任何 Key | 直接返回 BM25 命中的原文片段,不做 LLM 总结。零外网请求,适合完全离线场景。 |
+| 智能问答(DeepSeek) | 配置 `DEEPSEEK_API_KEY` | 通过 Tool Calling 自主检索,基于片段生成自然语言回答,判断文档中是否真有答案。支付宝充值、中文好、性价比高。 |
+| 智能问答(本地模型) | 配置 `OPENAI_BASE_URL` 指向内网模型 | 同上,但 AI 总结全程在客户内网完成,数据零外发。 |
+| 智能问答(Claude) | 配置 `ANTHROPIC_API_KEY` | 同上,使用 Claude。 |
 
 没有 API Key 也能完整运行和演示,这是刻意的设计:核心检索链路不依赖付费服务。
 
@@ -27,7 +31,7 @@
 - 后端:FastAPI(Python)
 - 检索:手写 BM25 算法 + jieba 中文分词(搜索引擎模式)
 - 文档解析:pypdf / python-docx,支持 pdf / txt / md / docx
-- Agent:Anthropic SDK,原生 Tool Calling 多轮循环
+- Agent:OpenAI 兼容 Tool Calling 多轮循环,可对接 DeepSeek / 本地开源模型 / Claude
 - 前端:单页原生 HTML/JS,无构建步骤
 - 文档存储:进程内存,按会话隔离,不落盘(见下方"隐私")
 
@@ -60,16 +64,22 @@ uvicorn backend.main:app --reload
 # 打开 http://localhost:8000
 ```
 
-可选:开启 Agent 模式
+可选:开启智能问答模式
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-xxxx   # 从 console.anthropic.com 获取
+export DEEPSEEK_API_KEY=sk-xxxx   # 从 platform.deepseek.com 获取,支付宝充值即可
 uvicorn backend.main:app --reload
 ```
 
 ## 部署
 
-仓库包含 `render.yaml`,在 Render 连接本仓库即可一键部署。如需 Agent 模式,在 Render 后台 Environment 添加 `ANTHROPIC_API_KEY`。
+### 在线托管(演示用)
+
+仓库包含 `render.yaml`,在 Render 连接本仓库即可一键部署。如需智能问答,在 Render 后台 Environment 添加 `DEEPSEEK_API_KEY`。
+
+### 私有化部署(核心场景)
+
+支持完全私有化部署到企业内网,文档与对话全程不出公司网络——这是公网文档问答产品做不到的。三种数据安全档位:完全离线(零外网请求)、接云端 DeepSeek、内网自建开源模型(数据零外发 + AI 总结)。一行 `docker compose up -d` 启动。详见 [DEPLOY.md](DEPLOY.md)。
 
 ## 接口
 

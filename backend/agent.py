@@ -79,7 +79,12 @@ def _get_llm_config():
     if os.environ.get("DEEPSEEK_API_KEY"):
         return (os.environ["DEEPSEEK_API_KEY"], "https://api.deepseek.com", "deepseek-chat", "deepseek")
     if os.environ.get("OPENAI_API_KEY"):
-        return (os.environ["OPENAI_API_KEY"], None, "gpt-4o-mini", "openai")
+        # 支持自定义 base_url:客户内网自建的开源模型(vLLM 等)只要兼容 OpenAI 接口即可接入,
+        # 实现"数据零外发"的完全本地化部署。未设置则走 OpenAI 官方。
+        base_url = os.environ.get("OPENAI_BASE_URL")
+        model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        mode = "local_model" if base_url else "openai"
+        return (os.environ["OPENAI_API_KEY"], base_url, model, mode)
     return (None, None, None, None)
 
 

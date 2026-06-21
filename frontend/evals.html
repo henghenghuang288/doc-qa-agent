@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>评估报告 · 企业文档问答 Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#15141a; --panel:#1c1a22; --panel-raised:#242028; --border:#322f3b;
+    --text:#f0ece4; --muted:#8d8896; --accent:#ff9d3d; --accent-soft:rgba(255,157,61,0.14);
+    --ok:#6ee7b7; --warn:#ff6b6b; --radius:10px;
+    --display:'Space Grotesk',sans-serif; --mono:'JetBrains Mono',monospace; --body:'Inter',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);min-height:100vh;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:18px 24px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:10px;}
+  .mark{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:700;font-size:17px;}
+  .tally{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+  a.back{color:var(--muted);text-decoration:none;font-size:13px;font-family:var(--mono);}
+  a.back:hover{color:var(--accent);}
+
+  .wrap{max-width:760px;margin:0 auto;padding:24px;}
+  .intro{color:var(--muted);font-size:13.5px;line-height:1.7;margin-bottom:20px;}
+  .intro b{color:var(--text);}
+
+  .run-btn{
+    background:var(--accent);color:#1a1206;border:none;border-radius:var(--radius);
+    padding:12px 22px;font-family:var(--display);font-weight:700;font-size:14.5px;cursor:pointer;
+  }
+  .run-btn:disabled{opacity:0.5;cursor:not-allowed;}
+  .run-btn:not(:disabled):hover{filter:brightness(1.08);}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:22px 0;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;}
+  .card .label{font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:6px;}
+  .card .value{font-family:var(--display);font-weight:700;font-size:24px;}
+  .card .value.ok{color:var(--ok);}
+  .card .value.warn{color:var(--warn);}
+  .card .sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:4px;}
+
+  .na-note{
+    font-family:var(--mono);font-size:12px;color:var(--muted);
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    padding:10px 14px;margin-bottom:20px;line-height:1.6;
+  }
+
+  .case{
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    padding:12px 14px;margin-bottom:10px;
+  }
+  .case.pass{border-left:3px solid var(--ok);}
+  .case.fail{border-left:3px solid var(--warn);}
+  .case .q{font-size:14px;margin-bottom:4px;}
+  .case .meta{font-family:var(--mono);font-size:11px;color:var(--muted);}
+  .case .reason{font-family:var(--mono);font-size:11.5px;color:var(--text);margin-top:6px;}
+  .case .answer{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:4px;white-space:pre-wrap;}
+  .case .note{font-size:11.5px;color:var(--accent);margin-top:6px;}
+
+  h2{font-family:var(--display);font-size:15px;margin:24px 0 12px;}
+  .loading{color:var(--muted);font-family:var(--mono);font-size:13px;padding:20px 0;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="mark"><span class="tally"></span> 评估报告</div>
+  <a class="back" href="/">← 返回问答界面</a>
+</div>
+
+<div class="wrap">
+  <p class="intro">
+    用一份标准测试文档 + <b>24 道金标准测试题</b>(15 道文档里确实有答案,9 道文档里没有答案、其中 4 道是故意诱导编造的陷阱题)真实跑一遍上传-检索-问答全流程,不是单元测试,是端到端评估。
+  </p>
+
+  <button class="run-btn" id="runBtn">运行评估</button>
+
+  <div id="reportArea"></div>
+</div>
+
+<script>
+const runBtn = document.getElementById('runBtn');
+const area = document.getElementById('reportArea');
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s || '';
+  return div.innerHTML;
+}
+
+runBtn.addEventListener('click', async () => {
+  runBtn.disabled = true;
+  runBtn.textContent = '评估运行中…';
+  area.innerHTML = '<div class="loading">正在逐题提问并打分,大约需要几十秒…</div>';
+
+  try {
+    const res = await fetch('/api/evals');
+    const data = await res.json();
+    const s = data.summary;
+
+    let naNote = '';
+    if (s.refusal_accuracy_note) {
+      naNote = `<div class="na-note">ⓘ ${s.refusal_accuracy_note}</div>`;
+    }
+
+    const cardsHtml = `
+      <div class="cards">
+        <div class="card"><div class="label">模式</div><div class="value" style="font-size:16px">${s.mode === 'offline_retrieval' ? 'OFFLINE 纯检索' : (s.mode || '-')}</div></div>
+        <div class="card"><div class="label">通过率</div><div class="value ${s.pass_rate >= 80 ? 'ok' : 'warn'}">${s.pass_rate ?? '-'}%</div><div class="sub">${s.passed}/${s.scored_cases} 题(${s.na_cases} 题不适用本次模式)</div></div>
+        <div class="card"><div class="label">可回答题命中率</div><div class="value ${s.answerable_accuracy >= 80 ? 'ok' : 'warn'}">${s.answerable_accuracy ?? '-'}%</div></div>
+        <div class="card"><div class="label">拒答准确率</div><div class="value ${s.refusal_accuracy === null ? '' : (s.refusal_accuracy >= 80 ? 'ok' : 'warn')}">${s.refusal_accuracy ?? 'N/A'}%</div></div>
+      </div>
+      ${naNote}
+    `;
+
+    let resultsHtml = '<h2>逐题结果</h2>';
+    data.results.forEach(r => {
+      const cls = !r.metric_applicable ? '' : (r.passed ? 'pass' : 'fail');
+      const tag = !r.metric_applicable ? 'N/A' : (r.passed ? '✓ 通过' : '✗ 未通过');
+      resultsHtml += `
+        <div class="case ${cls}">
+          <div class="q">${escapeHtml(r.question)}</div>
+          <div class="meta">${r.answerable_expected ? '预期:可回答' : '预期:应拒答'} · ${tag}</div>
+          <div class="reason">${escapeHtml(r.reason)}</div>
+          <div class="answer">${escapeHtml((r.answer || '').slice(0, 150))}</div>
+          ${r.note ? `<div class="note">陷阱说明:${escapeHtml(r.note)}</div>` : ''}
+        </div>
+      `;
+    });
+
+    area.innerHTML = cardsHtml + resultsHtml;
+  } catch (e) {
+    area.innerHTML = '<div class="loading">评估请求失败,请确认后端服务已启动。</div>';
+  } finally {
+    runBtn.disabled = false;
+    runBtn.textContent = '重新运行评估';
+  }
+});
+</script>
+</body>
+</html>

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from .agent import answer_question
 from .document_processor import DocumentError, chunk_text, parse_document
+from .evals import run_evals
 from .session_store import create_session, get_session
 
 app = FastAPI(title="企业文档问答 Agent", version="0.2.0")
@@ -76,6 +77,11 @@ def ask(session_id: str, body: Question):
         raise HTTPException(status_code=400, detail="当前会话还没有上传任何文档")
 
     return answer_question(session.index, body.question)
+
+
+@app.get("/api/evals")
+def evals():
+    return run_evals()
 
 
 _FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")

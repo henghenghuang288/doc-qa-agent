@@ -110,6 +110,8 @@ runBtn.addEventListener('click', async () => {
         <div class="card"><div class="label">通过率</div><div class="value ${s.pass_rate >= 80 ? 'ok' : 'warn'}">${s.pass_rate ?? '-'}%</div><div class="sub">${s.passed}/${s.scored_cases} 题(${s.na_cases} 题不适用本次模式)</div></div>
         <div class="card"><div class="label">可回答题命中率</div><div class="value ${s.answerable_accuracy >= 80 ? 'ok' : 'warn'}">${s.answerable_accuracy ?? '-'}%</div></div>
         <div class="card"><div class="label">拒答准确率</div><div class="value ${s.refusal_accuracy === null ? '' : (s.refusal_accuracy >= 80 ? 'ok' : 'warn')}">${s.refusal_accuracy ?? 'N/A'}%</div></div>
+        <div class="card"><div class="label">平均响应耗时</div><div class="value" style="font-size:18px">${s.avg_latency_ms != null ? s.avg_latency_ms + ' ms' : '-'}</div></div>
+        <div class="card"><div class="label">总Token消耗</div><div class="value" style="font-size:18px">${s.total_tokens ?? '-'}</div></div>
       </div>
       ${naNote}
     `;

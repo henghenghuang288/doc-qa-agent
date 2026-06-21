@@ -14,10 +14,19 @@ RAG 问答 Agent
                             (这个模式本身是诚实且有用的,很多企业内部搜索工具本质就是这个)
 
 DeepSeek 与 OpenAI 的 Tool Calling 格式一致,因此用 openai SDK 调用,只需把 base_url 指向 DeepSeek。
+
+全程使用异步客户端(AsyncOpenAI/AsyncAnthropic):FastAPI 服务一次要同时处理多个用户的提问请求,
+如果用同步客户端,等大模型 API 返回的这几秒里整个进程会被卡住、没法处理别的请求;
+异步客户端在等待网络 I/O 时能让出控制权去处理其他请求,这是生产环境 LLM 应用的标准做法。
+
+同时记录每次调用的耗时和 token 消耗(cost/latency 可观测性最基础的一步):
+每次大模型调用都会在 trace 里附带 latency_ms 和 usage(prompt/completion/total token 数),
+这是后续做成本治理、限流、按任务分级选型的数据基础。
 """
 
 import json
 import os
+import time
 from typing import Any
 
 from .retrieval import BM25Index
@@ -53,8 +62,10 @@ SYSTEM_PROMPT = (
 
 def answer_offline(index: BM25Index, question: str) -> dict[str, Any]:
     """无 API Key 时的纯检索模式:直接返回命中的原文片段,不做LLM总结。"""
+    t0 = time.perf_counter()
     results = index.search(question, top_k=4)
-    trace = [{"tool": "search_documents", "input": {"query": question}, "output_count": len(results)}]
+    latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+    trace = [{"tool": "search_documents", "input": {"query": question}, "output_count": len(results), "latency_ms": latency_ms}]
 
     if not results:
         return {
@@ -63,6 +74,7 @@ def answer_offline(index: BM25Index, question: str) -> dict[str, Any]:
             "grounded": False,
             "citations": [],
             "trace": trace,
+            "usage": None,
         }
 
     return {
@@ -71,6 +83,7 @@ def answer_offline(index: BM25Index, question: str) -> dict[str, Any]:
         "grounded": True,
         "citations": results,
         "trace": trace,
+        "usage": None,
     }
 
 
@@ -88,25 +101,51 @@ def _get_llm_config():
     return (None, None, None, None)
 
 
-def answer_live_openai(index: BM25Index, question: str, api_key: str, base_url: str, model: str, mode_name: str) -> dict[str, Any]:
-    """用 OpenAI 兼容接口(DeepSeek/OpenAI)做带工具调用的多轮问答。"""
-    from openai import OpenAI
+def _usage_dict(response) -> dict | None:
+    """从 API 响应里取出 token 用量,统一成 dict,取不到就返回 None 而不是报错。"""
+    usage = getattr(response, "usage", None)
+    if not usage:
+        return None
+    return {
+        "prompt_tokens": getattr(usage, "prompt_tokens", None),
+        "completion_tokens": getattr(usage, "completion_tokens", None),
+        "total_tokens": getattr(usage, "total_tokens", None),
+    }
 
-    client = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
+
+def _merge_usage(total: dict | None, new: dict | None) -> dict | None:
+    """多轮工具调用会产生多次 API 调用,把每轮的 token 消耗累加成本次提问的总消耗。"""
+    if new is None:
+        return total
+    if total is None:
+        return dict(new)
+    return {k: (total.get(k) or 0) + (new.get(k) or 0) for k in ("prompt_tokens", "completion_tokens", "total_tokens")}
+
+
+async def answer_live_openai(index: BM25Index, question: str, api_key: str, base_url: str, model: str, mode_name: str) -> dict[str, Any]:
+    """用 OpenAI 兼容接口(DeepSeek/OpenAI)做带工具调用的多轮问答,异步客户端,不阻塞其他并发请求。"""
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url) if base_url else AsyncOpenAI(api_key=api_key)
     trace: list[dict[str, Any]] = []
     last_results: list[dict] = []
+    total_usage: dict | None = None
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": question},
     ]
 
     for _ in range(4):
-        response = client.chat.completions.create(
+        t0 = time.perf_counter()
+        response = await client.chat.completions.create(
             model=model,
             messages=messages,
             tools=OPENAI_TOOLS,
             max_tokens=1500,
         )
+        call_latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+        call_usage = _usage_dict(response)
+        total_usage = _merge_usage(total_usage, call_usage)
         msg = response.choices[0].message
 
         # 没有工具调用 -> 这是最终回答
@@ -120,6 +159,7 @@ def answer_live_openai(index: BM25Index, question: str, api_key: str, base_url: 
 
             cited_ids = set(parsed.get("cited_chunk_ids", []))
             citations = [r for r in last_results if r["chunk_id"] in cited_ids] or last_results
+            trace.append({"event": "llm_final_answer", "latency_ms": call_latency_ms, "usage": call_usage})
 
             return {
                 "mode": f"live_{mode_name}",
@@ -127,9 +167,11 @@ def answer_live_openai(index: BM25Index, question: str, api_key: str, base_url: 
                 "grounded": parsed.get("grounded"),
                 "citations": citations,
                 "trace": trace,
+                "usage": total_usage,
             }
 
         # 有工具调用 -> 执行检索,把结果回填
+        trace.append({"event": "llm_tool_call_decision", "latency_ms": call_latency_ms, "usage": call_usage})
         messages.append({
             "role": "assistant",
             "content": msg.content,
@@ -148,9 +190,11 @@ def answer_live_openai(index: BM25Index, question: str, api_key: str, base_url: 
             except json.JSONDecodeError:
                 args = {"query": question}
             query = args.get("query", question)
+            t_search = time.perf_counter()
             results = index.search(query, top_k=4)
+            search_latency_ms = round((time.perf_counter() - t_search) * 1000, 1)
             last_results = results
-            trace.append({"tool": "search_documents", "input": {"query": query}, "output_count": len(results)})
+            trace.append({"tool": "search_documents", "input": {"query": query}, "output_count": len(results), "latency_ms": search_latency_ms})
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
@@ -160,11 +204,11 @@ def answer_live_openai(index: BM25Index, question: str, api_key: str, base_url: 
                 ),
             })
 
-    return {"mode": f"live_{mode_name}", "answer": "", "grounded": False, "citations": [], "trace": trace, "error": "超过最大轮次未收敛"}
+    return {"mode": f"live_{mode_name}", "answer": "", "grounded": False, "citations": [], "trace": trace, "usage": total_usage, "error": "超过最大轮次未收敛"}
 
 
-def answer_live_claude(index: BM25Index, question: str) -> dict[str, Any]:
-    """Claude 模式(保留,以备将来用 Anthropic key)。"""
+async def answer_live_claude(index: BM25Index, question: str) -> dict[str, Any]:
+    """Claude 模式(保留,以备将来用 Anthropic key),异步客户端。"""
     import anthropic
 
     claude_tools = [{
@@ -172,16 +216,29 @@ def answer_live_claude(index: BM25Index, question: str) -> dict[str, Any]:
         "description": OPENAI_TOOLS[0]["function"]["description"],
         "input_schema": OPENAI_TOOLS[0]["function"]["parameters"],
     }]
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     trace: list[dict[str, Any]] = []
     messages = [{"role": "user", "content": question}]
     last_results: list[dict] = []
+    total_usage: dict | None = None
 
     for _ in range(4):
-        response = client.messages.create(
+        t0 = time.perf_counter()
+        response = await client.messages.create(
             model="claude-sonnet-4-6", max_tokens=1500,
             system=SYSTEM_PROMPT, tools=claude_tools, messages=messages,
         )
+        call_latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+        usage = getattr(response, "usage", None)
+        call_usage = None
+        if usage:
+            call_usage = {
+                "prompt_tokens": getattr(usage, "input_tokens", None),
+                "completion_tokens": getattr(usage, "output_tokens", None),
+                "total_tokens": (getattr(usage, "input_tokens", 0) or 0) + (getattr(usage, "output_tokens", 0) or 0),
+            }
+        total_usage = _merge_usage(total_usage, call_usage)
+
         if response.stop_reason != "tool_use":
             final_text = "".join(b.text for b in response.content if b.type == "text")
             cleaned = final_text.replace("```json", "").replace("```", "").strip()
@@ -191,43 +248,49 @@ def answer_live_claude(index: BM25Index, question: str) -> dict[str, Any]:
                 parsed = {"answer": final_text, "grounded": None, "cited_chunk_ids": []}
             cited_ids = set(parsed.get("cited_chunk_ids", []))
             citations = [r for r in last_results if r["chunk_id"] in cited_ids] or last_results
+            trace.append({"event": "llm_final_answer", "latency_ms": call_latency_ms, "usage": call_usage})
             return {"mode": "live_claude", "answer": parsed.get("answer", ""),
-                    "grounded": parsed.get("grounded"), "citations": citations, "trace": trace}
+                    "grounded": parsed.get("grounded"), "citations": citations, "trace": trace, "usage": total_usage}
 
+        trace.append({"event": "llm_tool_call_decision", "latency_ms": call_latency_ms, "usage": call_usage})
         messages.append({"role": "assistant", "content": response.content})
         tool_results = []
         for block in response.content:
             if block.type != "tool_use":
                 continue
+            t_search = time.perf_counter()
             results = index.search(block.input.get("query", question), top_k=4)
+            search_latency_ms = round((time.perf_counter() - t_search) * 1000, 1)
             last_results = results
-            trace.append({"tool": "search_documents", "input": block.input, "output_count": len(results)})
+            trace.append({"tool": "search_documents", "input": block.input, "output_count": len(results), "latency_ms": search_latency_ms})
             tool_results.append({
                 "type": "tool_result", "tool_use_id": block.id,
                 "content": json.dumps([{"chunk_id": r["chunk_id"], "source": r["source"], "text": r["text"]} for r in results], ensure_ascii=False),
             })
         messages.append({"role": "user", "content": tool_results})
 
-    return {"mode": "live_claude", "answer": "", "grounded": False, "citations": [], "trace": trace, "error": "超过最大轮次未收敛"}
+    return {"mode": "live_claude", "answer": "", "grounded": False, "citations": [], "trace": trace, "usage": total_usage, "error": "超过最大轮次未收敛"}
 
 
-def answer_question(index: BM25Index, question: str) -> dict[str, Any]:
+async def answer_question(index: BM25Index, question: str) -> dict[str, Any]:
+    request_t0 = time.perf_counter()
     api_key, base_url, model, mode_name = _get_llm_config()
+
     if api_key:
         try:
-            return answer_live_openai(index, question, api_key, base_url, model, mode_name)
+            result = await answer_live_openai(index, question, api_key, base_url, model, mode_name)
         except Exception as e:
             # API 出问题时降级到纯检索,并把错误带回去方便排查,避免界面整个挂掉
-            fallback = answer_offline(index, question)
-            fallback["note"] = f"智能模式调用失败,已降级为纯检索: {type(e).__name__}"
-            return fallback
-
-    if os.environ.get("ANTHROPIC_API_KEY"):
+            result = answer_offline(index, question)
+            result["note"] = f"智能模式调用失败,已降级为纯检索: {type(e).__name__}"
+    elif os.environ.get("ANTHROPIC_API_KEY"):
         try:
-            return answer_live_claude(index, question)
+            result = await answer_live_claude(index, question)
         except Exception as e:
-            fallback = answer_offline(index, question)
-            fallback["note"] = f"Claude 调用失败,已降级为纯检索: {type(e).__name__}"
-            return fallback
+            result = answer_offline(index, question)
+            result["note"] = f"Claude 调用失败,已降级为纯检索: {type(e).__name__}"
+    else:
+        result = answer_offline(index, question)
 
-    return answer_offline(index, question)
+    result["total_latency_ms"] = round((time.perf_counter() - request_t0) * 1000, 1)
+    return result

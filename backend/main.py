@@ -69,19 +69,19 @@ class Question(BaseModel):
 
 
 @app.post("/api/session/{session_id}/ask")
-def ask(session_id: str, body: Question):
+async def ask(session_id: str, body: Question):
     session = get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="会话不存在或已过期,请刷新页面重新开始")
     if not session.index.chunks:
         raise HTTPException(status_code=400, detail="当前会话还没有上传任何文档")
 
-    return answer_question(session.index, body.question)
+    return await answer_question(session.index, body.question)
 
 
 @app.get("/api/evals")
-def evals():
-    return run_evals()
+async def evals():
+    return await run_evals()
 
 
 _FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")

@@ -60,7 +60,7 @@ def _judge_unanswerable_case(case: dict, result: dict, mode: str) -> tuple[bool,
     return False, "未拒答,疑似编造了文档中不存在的内容", True
 
 
-def run_evals() -> dict[str, Any]:
+async def run_evals() -> dict[str, Any]:
     index = BM25Index()
     chunks = chunk_text(GOLDEN_DOCUMENT)
     index.add_documents(chunks, source="golden_eval_doc.txt")
@@ -68,9 +68,16 @@ def run_evals() -> dict[str, Any]:
     results = []
     t0 = time.time()
     detected_mode = None
+    total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    latencies_ms = []
     for case in GOLDEN_QUESTIONS:
-        r = answer_question(index, case["question"])
+        r = await answer_question(index, case["question"])
         detected_mode = r.get("mode")
+        if r.get("total_latency_ms") is not None:
+            latencies_ms.append(r["total_latency_ms"])
+        if r.get("usage"):
+            for k in total_usage:
+                total_usage[k] += r["usage"].get(k) or 0
         if case["answerable"]:
             passed, reason = _judge_answerable_case(case, r)
             metric_applicable = True
@@ -86,6 +93,7 @@ def run_evals() -> dict[str, Any]:
             "answer": r.get("answer"),
             "grounded": r.get("grounded"),
             "mode": r.get("mode"),
+            "latency_ms": r.get("total_latency_ms"),
             "note": case.get("note"),
         })
     elapsed = round(time.time() - t0, 1)
@@ -102,6 +110,8 @@ def run_evals() -> dict[str, Any]:
     skipped_na = [r for r in results if not r["metric_applicable"]]
     failures = [r for r in scored if not r["passed"]]
 
+    avg_latency_ms = round(sum(latencies_ms) / len(latencies_ms), 1) if latencies_ms else None
+
     return {
         "summary": {
             "mode": detected_mode,
@@ -114,6 +124,8 @@ def run_evals() -> dict[str, Any]:
             "refusal_accuracy": refusal_acc,
             "refusal_accuracy_note": "纯检索模式下不评估拒答能力(设计上无语义判断层),需配置 API Key 切换到智能问答模式后该指标才有效" if detected_mode == "offline_retrieval" else None,
             "elapsed_seconds": elapsed,
+            "avg_latency_ms": avg_latency_ms,
+            "total_tokens": total_usage["total_tokens"] if any(total_usage.values()) else None,
         },
         "failures": failures,
         "results": results,

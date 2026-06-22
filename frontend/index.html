@@ -235,6 +235,12 @@ async function askQuestion() {
       ? `<span class="grounded-tag">● 基于检索到的文档片段作答</span>`
       : `<span class="grounded-tag no">○ 未在文档中找到依据</span>`;
 
+    const escalationHtml = data.needs_escalation
+      ? `<div style="margin-top:10px;padding:10px 14px;background:rgba(255,157,61,0.1);border:1px solid rgba(255,157,61,0.3);border-radius:8px;font-size:13px;color:#ff9d3d;">
+           💬 此问题超出文档范围，建议转人工客服处理
+         </div>`
+      : '';
+
     let citationsHtml = '';
     if (data.citations && data.citations.length) {
       citationsHtml = `<div class="citations"><div class="label">引用的原文片段(共${data.citations.length}处)</div>` +
@@ -242,7 +248,7 @@ async function askQuestion() {
         `</div>`;
     }
 
-    aBlock.innerHTML = `<div class="a-text">${groundedTag}<br>${escapeHtml(data.answer)}</div>${citationsHtml}`;
+    aBlock.innerHTML = `<div class="a-text">${groundedTag}<br>${escapeHtml(data.answer)}</div>${escalationHtml}${citationsHtml}`;
   } catch (e) {
     block.querySelector('.a-block').innerHTML = `<div class="a-text warn">⚠ 请求失败,请确认后端服务已启动</div>`;
   } finally {

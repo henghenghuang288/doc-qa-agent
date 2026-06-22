@@ -29,9 +29,26 @@ import json
 import operator
 import os
 import time
+from datetime import datetime
 from typing import Any
 
 from .retrieval import BM25Index
+
+# 记录答不上来的问题——这是"产品反馈闭环"的起点：
+# 收集真实用户问到但文档里没有答案的问题，定期补充进文档，系统越用越聪明。
+_UNANSWERABLE_LOG: list[dict] = []
+
+def _log_unanswerable(question: str) -> None:
+    _UNANSWERABLE_LOG.append({
+        "question": question,
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+    })
+    # 只保留最近100条，防止内存无限增长
+    if len(_UNANSWERABLE_LOG) > 100:
+        _UNANSWERABLE_LOG.pop(0)
+
+def get_unanswerable_log() -> list[dict]:
+    return list(_UNANSWERABLE_LOG)
 
 # 安全计算:只允许数值运算(加减乘除、乘方、取余、括号、正负号),
 # 不能用 eval() 直接执行字符串——那样等于让模型输出的任意文本在服务器上跑代码,是真实的安全隐患。
@@ -205,17 +222,43 @@ async def answer_live_openai(index: BM25Index, question: str, api_key: str, base
             try:
                 parsed = json.loads(cleaned)
             except json.JSONDecodeError:
-                parsed = {"answer": final_text, "grounded": None, "cited_chunk_ids": []}
+                # JSON解析失败时，检查是否像一个残缺的JSON（以{开头）
+                # 如果是，说明模型输出格式有问题，提取可读部分或给友好提示
+                # 不能把原始JSON残文直接暴露给用户
+                if cleaned.startswith("{"):
+                    # 尝试提取answer字段的值
+                    import re
+                    m = re.search(r'"answer"\s*:\s*"(.*?)"(?:,|\})', cleaned, re.DOTALL)
+                    answer_text = m.group(1) if m else "抱歉，回答生成时出现格式问题，请重新提问。"
+                    parsed = {"answer": answer_text, "grounded": None, "cited_chunk_ids": []}
+                else:
+                    parsed = {"answer": final_text, "grounded": None, "cited_chunk_ids": []}
 
             cited_ids = set(parsed.get("cited_chunk_ids", []))
             citations = [r for r in last_results if r["chunk_id"] in cited_ids] or last_results
+
+            answer = parsed.get("answer", "")
+            grounded = parsed.get("grounded")
+
+            # 转人工逻辑：答案明确表示未找到时，附加转人工提示
+            UNANSWERABLE_SIGNALS = ["未能在文档", "未找到", "没有找到", "无法回答", "文档中没有", "找不到相关"]
+            needs_escalation = (
+                grounded is False or
+                any(s in answer for s in UNANSWERABLE_SIGNALS)
+            )
+            if needs_escalation and not citations:
+                escalation_hint = "\n\n💬 此问题超出文档范围，建议转人工客服处理。"
+                answer = answer + escalation_hint
+                _log_unanswerable(question)
+
             trace.append({"event": "llm_final_answer", "latency_ms": call_latency_ms, "usage": call_usage})
 
             return {
                 "mode": f"live_{mode_name}",
-                "answer": parsed.get("answer", final_text),
-                "grounded": parsed.get("grounded"),
+                "answer": answer,
+                "grounded": grounded,
                 "citations": citations,
+                "needs_escalation": needs_escalation and not citations,
                 "trace": trace,
                 "usage": total_usage,
             }

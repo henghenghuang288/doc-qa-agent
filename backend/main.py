@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .agent import answer_question
+from .agent import answer_question, get_unanswerable_log
 from .document_processor import DocumentError, chunk_text, parse_document
 from .evals import run_evals
 from .session_store import create_session, get_session
@@ -82,6 +82,13 @@ async def ask(session_id: str, body: Question):
 @app.get("/api/evals")
 async def evals():
     return await run_evals()
+
+
+@app.get("/api/unanswerable")
+def unanswerable():
+    """返回本次服务运行期间答不上来的问题列表——产品反馈闭环的数据基础。"""
+    log = get_unanswerable_log()
+    return {"count": len(log), "questions": log}
 
 
 _FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")

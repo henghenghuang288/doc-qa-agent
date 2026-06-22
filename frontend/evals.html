@@ -74,13 +74,24 @@
     用一份标准测试文档 + <b>24 道金标准测试题</b>(15 道文档里确实有答案,9 道文档里没有答案、其中 4 道是故意诱导编造的陷阱题)真实跑一遍上传-检索-问答全流程,不是单元测试,是端到端评估。
   </p>
 
-  <button class="run-btn" id="runBtn">运行评估</button>
+  <button class="run-btn" id="runBtn">运行评估（完整模式）</button>
+  <button class="run-btn" id="runOfflineBtn" style="background:var(--panel-raised);color:var(--muted);margin-left:10px;font-size:12px;">离线快速评估（不消耗Token）</button>
 
   <div id="reportArea"></div>
 </div>
 
 <script>
 const runBtn = document.getElementById('runBtn');
+const runOfflineBtn = document.getElementById('runOfflineBtn');
+
+async function doEval(offline) {
+  runBtn.disabled = true; runOfflineBtn.disabled = true;
+  const btn = offline ? runOfflineBtn : runBtn;
+  btn.textContent = '运行中…';
+  area.innerHTML = '<div class="loading">正在逐题提问并打分…</div>';
+  try {
+    const url = offline ? '/api/evals?offline=true' : '/api/evals';
+    const res = await fetch(url);
 const area = document.getElementById('reportArea');
 
 function escapeHtml(s) {
@@ -89,7 +100,7 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
-runBtn.addEventListener('click', async () => {
+async function doEvalRun(offline) {
   runBtn.disabled = true;
   runBtn.textContent = '评估运行中…';
   area.innerHTML = '<div class="loading">正在逐题提问并打分,大约需要几十秒…</div>';
@@ -139,6 +150,8 @@ runBtn.addEventListener('click', async () => {
     runBtn.textContent = '重新运行评估';
   }
 });
+runBtn.addEventListener('click', () => doEvalRun(false));
+runOfflineBtn.addEventListener('click', () => doEvalRun(true));
 </script>
 </body>
 </html>

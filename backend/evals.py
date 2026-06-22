@@ -60,7 +60,20 @@ def _judge_unanswerable_case(case: dict, result: dict, mode: str) -> tuple[bool,
     return False, "未拒答,疑似编造了文档中不存在的内容", True
 
 
-async def run_evals() -> dict[str, Any]:
+async def run_evals(force_offline: bool = False) -> dict[str, Any]:
+    """
+    force_offline=True 时强制用纯检索模式跑评估，不消耗任何 API token。
+    适合日常检查"检索召回率是否正常"，不需要每次都烧 token 跑完整智能模式评估。
+    完整评估（含拒答准确率）需要 force_offline=False 且配置了 API Key。
+    """
+    import os
+    if force_offline:
+        # 临时移除 key，让 answer_question 走纯检索模式
+        _saved = {k: os.environ.pop(k, None)
+                  for k in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")}
+    else:
+        _saved = {}
+
     index = BM25Index()
     chunks = chunk_text(GOLDEN_DOCUMENT)
     index.add_documents(chunks, source="golden_eval_doc.txt")
@@ -115,9 +128,15 @@ async def run_evals() -> dict[str, Any]:
 
     avg_latency_ms = round(sum(latencies_ms) / len(latencies_ms), 1) if latencies_ms else None
 
+    # 恢复被临时移除的 key（force_offline 模式）
+    for k, v in _saved.items():
+        if v is not None:
+            import os as _os; _os.environ[k] = v
+
     return {
         "summary": {
             "mode": detected_mode,
+            "force_offline": force_offline,
             "total_cases": len(results),
             "scored_cases": total,
             "na_cases": len(skipped_na),

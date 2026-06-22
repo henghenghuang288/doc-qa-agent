@@ -1,6 +1,7 @@
 import os
+import time as _time
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -10,7 +11,7 @@ from .document_processor import DocumentError, chunk_text, parse_document
 from .evals import run_evals
 from .session_store import create_session, get_session
 
-app = FastAPI(title="企业文档问答 Agent", version="0.2.0")
+app = FastAPI(title="企业文档问答 Agent", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,6 +19,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── 请求日志（轻量，内存存储，重启清空）──
+_REQUEST_LOG: list[dict] = []
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    t0 = _time.perf_counter()
+    response = await call_next(request)
+    latency_ms = round((_time.perf_counter() - t0) * 1000, 1)
+    path = request.url.path
+    # 只记录API调用，不记录静态文件
+    if path.startswith("/api/") and path not in ("/api/health", "/api/unanswerable"):
+        from datetime import datetime
+        _REQUEST_LOG.append({
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "method": request.method,
+            "path": path,
+            "status": response.status_code,
+            "latency_ms": latency_ms,
+        })
+        if len(_REQUEST_LOG) > 200:
+            _REQUEST_LOG.pop(0)
+    return response
 
 
 @app.get("/api/health")
@@ -80,8 +104,9 @@ async def ask(session_id: str, body: Question):
 
 
 @app.get("/api/evals")
-async def evals():
-    return await run_evals()
+async def evals(offline: bool = False):
+    """offline=true 时强制用纯检索模式跑，不消耗 API token，适合日常快速检查。"""
+    return await run_evals(force_offline=offline)
 
 
 @app.get("/api/unanswerable")
@@ -89,6 +114,12 @@ def unanswerable():
     """返回本次服务运行期间答不上来的问题列表——产品反馈闭环的数据基础。"""
     log = get_unanswerable_log()
     return {"count": len(log), "questions": log}
+
+
+@app.get("/api/logs")
+def request_logs():
+    """返回本次服务的API请求日志，用于展示真实使用记录。"""
+    return {"count": len(_REQUEST_LOG), "logs": list(reversed(_REQUEST_LOG))}
 
 
 _FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")

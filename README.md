@@ -1,89 +1,74 @@
-# 企业文档问答 Agent
+# Enterprise Document QA Agent
 
-一个可私有化部署的企业知识库问答系统:上传企业文档(产品手册、FAQ、政策文件等),系统基于文档原文回答问题,并标注每个答案引用的原文片段,确保回答可溯源、不编造。
+> 🇨🇳 [中文版见下方](#中文说明)
 
-这是智能客服 / 企业知识库这类产品的核心引擎部分,用 Claude 原生 Tool Calling 手写 Agent 循环实现,不依赖 LangChain / Dify 等框架,便于理解和控制底层逻辑。
+A privately-deployable enterprise document Q&A system. Upload your company documents (manuals, FAQs, policies), and the AI answers questions based **strictly** on the document content — citing the exact source passage for every answer, and honestly refusing when the answer isn't in the documents.
 
-## 它解决什么问题
+**Live demo:** https://doc-qa-agent-2f7j.onrender.com
 
-企业把 AI 用于客服或内部知识检索时,最大的风险是模型"一本正经地编造"——回答看起来通顺,实际文档里根本没有这回事。本项目通过两层结构控制这个风险:
+## Key Design Decisions
 
-1. **检索层**:用户提问时,先在已上传文档里检索出最相关的原文片段(BM25 + jieba 中文分词)。
-2. **生成层**:把检索到的片段交给 Claude,并强制要求"只能依据这些片段回答,片段里没有的内容必须明确说找不到"。
+| Decision | Why |
+|----------|-----|
+| Hand-written BM25 + jieba (no LangChain) | Understand and control every layer; easier to debug and explain |
+| Native Tool Calling loop | Model decides when to search vs. calculate; no framework magic |
+| Safe AST calculator tool | LLMs miscalculate; let code handle math via whitelist-only AST eval |
+| Anti-hallucination by design | Answer forced to ground in retrieved chunks; refusal when not found |
+| Three-tier private deployment | Fully offline / DeepSeek cloud / self-hosted model on customer intranet |
+| Async throughout (AsyncOpenAI) | Non-blocking; handles concurrent users without queuing |
 
-每个回答都会附带它引用的原文片段和来源文件名,使用者可以当场核对答案是否真的来自文档。
+## Evaluation System
 
-## 运行模式
+25 golden test cases including **4 "induced fabrication" trap questions** (phrased as if the answer exists but it doesn't). Automated end-to-end scoring across the full upload→retrieve→answer pipeline.
 
-按可用的 API Key 自动切换,无需改代码:
+Results on the live deployment (DeepSeek mode):
+- Answerable question accuracy: **100%**
+- Refusal accuracy (anti-hallucination): **88.9%**
 
-| 模式 | 触发条件 | 行为 |
-|------|----------|------|
-| 纯检索模式 | 未配置任何 Key | 直接返回 BM25 命中的原文片段,不做 LLM 总结。零外网请求,适合完全离线场景。 |
-| 智能问答(DeepSeek) | 配置 `DEEPSEEK_API_KEY` | 通过 Tool Calling 自主检索,基于片段生成自然语言回答,判断文档中是否真有答案。支付宝充值、中文好、性价比高。 |
-| 智能问答(本地模型) | 配置 `OPENAI_BASE_URL` 指向内网模型 | 同上,但 AI 总结全程在客户内网完成,数据零外发。 |
-| 智能问答(Claude) | 配置 `ANTHROPIC_API_KEY` | 同上,使用 Claude。 |
+Run evals at `/evals.html` — includes a zero-token offline mode for baseline checks.
 
-没有 API Key 也能完整运行和演示,这是刻意的设计:核心检索链路不依赖付费服务。
+## Private Deployment (Core Value Prop)
 
-## 技术栈
+Unlike public AI tools (ChatGPT, DeepSeek web), this system runs entirely on the customer's own server. Three security tiers:
 
-- 后端:FastAPI(Python)
-- 检索:手写 BM25 算法 + jieba 中文分词(搜索引擎模式)
-- 文档解析:pypdf / python-docx,支持 pdf / txt / md / docx
-- Agent:OpenAI 兼容 Tool Calling 多轮循环,可对接 DeepSeek / 本地开源模型 / Claude
-- 前端:单页原生 HTML/JS,无构建步骤
-- 文档存储:进程内存,按会话隔离,不落盘(见下方"隐私")
+1. **Fully offline** — zero external requests, pure BM25 retrieval
+2. **DeepSeek cloud** — document chunks sent to DeepSeek API for summarization
+3. **Self-hosted model** — point `OPENAI_BASE_URL` at any OpenAI-compatible local model (e.g. vLLM + Qwen); data never leaves the intranet
 
-## 支持的文档
+## Stack
 
-- 格式:pdf、txt、md、docx
-- 单文件上限:10MB
-- 编码:txt/md 自动识别 utf-8 / gbk / gb18030(兼容老版 Office 导出)
-- 加密 PDF、扫描版(无文字层)PDF 会被显式拒绝并给出明确提示,而不是静默返回空内容
+Python · FastAPI · asyncio · BM25 · jieba · DeepSeek/Claude/OpenAI-compatible · Docker
 
-## 已知局限与升级路径
-
-诚实地列出当前版本做不到的部分,以及生产环境的改进方向:
-
-- **图片内容不可检索**:PDF 中的图片、图表只提取不了文字层。升级方向是接入 Claude 视觉能力对图片生成描述后再入库。
-- **BM25 是字面匹配**:提问与原文用词差异较大时(同义词、换种问法)召回会变差。升级方向是接入向量 embedding 做语义检索,或 BM25 + 向量混合检索。检索模块接口已设计为可平滑替换底层实现。
-- **无多轮对话记忆**:每个问题独立处理,不记忆上下文。
-- **内存存储,不持久化**:服务重启后已上传文档清空。生产环境需替换为加密持久化存储 + 客户级隔离。
-- **同步处理大文件**:超大文档解析会阻塞响应,故设 10MB 上限。生产环境应改为异步处理 + 进度查询。
-
-## 隐私
-
-上传的文档内容只存在服务进程内存中,按 session 隔离,不写入任何磁盘或数据库,服务重启即清空。会话超过 2 小时未使用自动回收。
-
-## 本地运行
+## Quick Start
 
 ```bash
 pip install -r requirements.txt
-uvicorn backend.main:app --reload
-# 打开 http://localhost:8000
-```
-
-可选:开启智能问答模式
-
-```bash
-export DEEPSEEK_API_KEY=sk-xxxx   # 从 platform.deepseek.com 获取,支付宝充值即可
+export DEEPSEEK_API_KEY=sk-xxxx   # optional; runs offline without it
 uvicorn backend.main:app --reload
 ```
 
-## 部署
+## API Endpoints
 
-### 在线托管(演示用)
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/session` | Create a new session |
+| `POST /api/session/{id}/upload` | Upload a document |
+| `POST /api/session/{id}/ask` | Ask a question |
+| `GET /api/evals[?offline=true]` | Run evaluation suite |
+| `GET /api/unanswerable` | Questions the system couldn't answer (feedback loop data) |
+| `GET /api/logs` | Request log (observability) |
 
-仓库包含 `render.yaml`,在 Render 连接本仓库即可一键部署。如需智能问答,在 Render 后台 Environment 添加 `DEEPSEEK_API_KEY`。
+---
 
-### 私有化部署(核心场景)
+## 中文说明
 
-支持完全私有化部署到企业内网,文档与对话全程不出公司网络——这是公网文档问答产品做不到的。三种数据安全档位:完全离线(零外网请求)、接云端 DeepSeek、内网自建开源模型(数据零外发 + AI 总结)。一行 `docker compose up -d` 启动。详见 [DEPLOY.md](DEPLOY.md)。
+可私有化部署的企业文档问答系统。上传企业文档后，AI 严格基于文档原文回答，每句答案标注引用来源，文档里没有的内容拒绝作答不编造。
 
-## 接口
+**核心差异化：** 系统能整体部署到客户自己的服务器上，数据不出内网——这是豆包、ChatGPT 等公网产品做不到的，解决企业数据合规问题。
 
-- `POST /api/session` — 创建会话
-- `POST /api/session/{id}/upload` — 上传文档(multipart 表单,字段名 file)
-- `POST /api/session/{id}/ask` — 提问(JSON: `{"question": "..."}`)
-- `GET /api/health` — 健康检查,返回当前是否为 Agent 模式
+**技术亮点：**
+- 手写 BM25 检索 + jieba 中文分词，不依赖 LangChain 框架
+- 原生 Tool Calling 多轮 Agent 循环，支持检索和计算两种工具
+- 25 道金标准评估测试含诱导编造陷阱题，可回答题命中率 100%
+- 全异步处理（AsyncOpenAI），支持并发请求
+- 三档私有化部署方案（完全离线 / DeepSeek / 内网自建模型）
